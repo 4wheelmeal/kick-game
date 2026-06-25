@@ -4,81 +4,278 @@
     <meta charset="UTF-8">
     <title>4wheelMeal Kick Math Game</title>
     <style>
-        body { margin: 0; padding: 0; background: transparent; overflow: hidden; font-family: 'Arial Black', Impact, sans-serif; }
-        #widget-container { display: flex; gap: 20px; width: 850px; height: 280px; background: rgba(0, 0, 0, 0.9); padding: 20px; border-radius: 15px; border: 3px solid #53fc18; box-shadow: 0 0 20px rgba(83, 252, 24, 0.3); box-sizing: border-box; }
-        .box { flex: 1; background: rgba(15, 15, 15, 0.95); border-radius: 12px; padding: 15px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
-        h2 { margin: 0 0 5px 0; color: #53fc18; text-transform: uppercase; font-size: 18px; letter-spacing: 1px; }
-        #question { font-size: 44px; font-weight: bold; color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.3); margin: auto 0; }
-        #last-winner { font-size: 14px; color: #aaaaaa; margin-top: auto; }
-        #winner-name { color: #53fc18; font-weight: bold; }
-        ol { text-align: left; margin: 0; padding-left: 25px; font-size: 16px; color: #fff; list-style-type: decimal; }
-        li { margin-bottom: 6px; }
-        li span { color: #53fc18; float: right; font-size: 15px; }
+        body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            overflow: hidden;
+            font-family: 'Arial Black', Impact, sans-serif;
+            color: #ffffff;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        #widget-container {
+            display: flex;
+            gap: 20px;
+            width: 900px;
+            height: 320px;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 25px;
+            border-radius: 16px;
+            border: 3px solid #53fc18;
+            box-shadow: 0 0 25px rgba(83, 252, 24, 0.4), inset 0 0 15px rgba(83, 252, 24, 0.1);
+            box-sizing: border-box;
+        }
+
+        .box {
+            flex: 1;
+            background: rgba(15, 15, 15, 0.85);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            overflow: hidden;
+        }
+
+        .box-left {
+            flex: 1.4;
+        }
+
+        .box-right {
+            flex: 1;
+        }
+
+        h2 {
+            margin: 0 0 10px 0;
+            color: #53fc18;
+            text-transform: uppercase;
+            font-size: 20px;
+            letter-spacing: 1.5px;
+            text-shadow: 0 0 8px rgba(83, 252, 24, 0.5);
+        }
+
+        #question {
+            font-size: 52px;
+            font-weight: 900;
+            color: #ffffff;
+            text-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+            margin: auto 0;
+            transition: all 0.2s ease;
+        }
+
+        #status-msg {
+            font-size: 22px;
+            color: #aaaaaa;
+            font-family: sans-serif;
+            font-weight: bold;
+        }
+
+        #last-winner {
+            font-size: 15px;
+            color: #aaaaaa;
+            margin-top: auto;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 8px;
+            border-radius: 6px;
+        }
+
+        #winner-name {
+            color: #53fc18;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(83, 252, 24, 0.5);
+        }
+
+        ol {
+            text-align: left;
+            margin: 0;
+            padding-left: 20px;
+            font-size: 18px;
+            list-style-type: decimal;
+        }
+
+        li {
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            padding-bottom: 4px;
+            font-family: sans-serif;
+            font-weight: bold;
+        }
+
+        li::marker {
+            color: #53fc18;
+            font-family: 'Arial Black', sans-serif;
+        }
+
+        li span.score-val {
+            color: #53fc18;
+            float: right;
+            font-family: 'Arial Black', sans-serif;
+            text-shadow: 0 0 5px rgba(83, 252, 24, 0.3);
+        }
     </style>
 </head>
 <body>
 
 <div id="widget-container">
-    <div class="box">
+    <div class="box box-left">
         <h2>Vyřeš příklad!</h2>
-        <div id="question">Čekám na chat...</div>
+        <div id="question"><span id="status-msg">Navazování spojení...</span></div>
         <div id="last-winner">Minulé kolo: <span id="winner-name">-</span></div>
     </div>
-    <div class="box">
+
+    <div class="box box-right">
         <h2>TOP 5 Šprti</h2>
-        <ol id="leaderboard"><li>Nikdo zatím nebodoval</li></ol>
+        <ol id="leaderboard">
+            <li>Čeká se na body...</li>
+        </ol>
     </div>
 </div>
 
 <script>
+    const KICK_CHANNEL_ID = "3314051"; // Tvoje fixní Kick ID kanálu 4wheelmeal
+    
     let currentAnswer = null;
     let scores = {};
+    let ws = null;
+    
+    // Konfigurace pro exponenciální backoff reconnect
+    let reconnectDelay = 3000; 
+    const MAX_RECONNECT_DELAY = 30000; 
+    let reconnectTimer = null;
 
     function generateQuestion() {
-        const num1 = Math.floor(Math.random() * 40) + 1;
-        const num2 = Math.floor(Math.random() * 40) + 1;
+        // Rozsah 0 - 100
+        const num1 = Math.floor(Math.random() * 101);
+        const num2 = Math.floor(Math.random() * 101);
         const operators = ['+', '-'];
         const operator = operators[Math.floor(Math.random() * operators.length)];
-        currentAnswer = (operator === '+') ? (num1 + num2) : (num1 - num2);
-        document.getElementById('question').style.fontSize = "44px";
-        document.getElementById('question').innerText = `${num1} ${operator} ${num2} = ?`;
+        
+        if (operator === '+') {
+            currentAnswer = num1 + num2;
+        } else {
+            // Abychom se vyhnuli záporným číslům (volitelné, ale pro stream čistší)
+            if (num1 < num2) {
+                return generateQuestion();
+            }
+            currentAnswer = num1 - num2;
+        }
+
+        const questionEl = document.getElementById('question');
+        questionEl.innerHTML = `${num1} ${operator} ${num2} = ?`;
     }
 
     function updateLeaderboard() {
         const leaderboardEl = document.getElementById('leaderboard');
         leaderboardEl.innerHTML = '';
-        const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+        const sorted = Object.entries(scores)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5);
+
         if (sorted.length === 0) {
-            leaderboardEl.innerHTML = '<li>Nikdo zatím nebodoval</li>';
+            leaderboardEl.innerHTML = '<li style="list-style:none; text-align:center; color:#666; margin-top:40px;">Nikdo zatím nebodoval</li>';
             return;
         }
+
         sorted.forEach(([user, score]) => {
             const li = document.createElement('li');
-            li.innerHTML = `${user} <span>${score} b</span>`;
+            li.innerHTML = `${user} <span class="score-val">${score}</span>`;
             leaderboardEl.appendChild(li);
         });
     }
 
-    // Naslouchání zprávám z "čtečky" chatu
-    window.addEventListener('message', (event) => {
-        if (event.data && event.data.type === 'kick_chat_msg') {
-            const user = event.data.user;
-            const message = event.data.text.trim();
-            const chatNumber = parseInt(message, 10);
+    function connectKickChat() {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        
+        console.log("Připojuji k oficiálnímu Kick Pusheru...");
+        
+        // Oficiální real-time cluster Kicku
+        ws = new WebSocket('wss://ws-us2.pusher.com/app/eb1d5f283081a78b93b4?protocol=7&client=js&version=7.4.0&flash=false');
 
-            if (!isNaN(chatNumber) && chatNumber === currentAnswer && message === chatNumber.toString()) {
-                scores[user] = (scores[user] || 0) + 1;
-                document.getElementById('winner-name').innerText = `${user} (+1b)`;
-                updateLeaderboard();
-                currentAnswer = null;
-                setTimeout(generateQuestion, 2000);
+        ws.onopen = () => {
+            console.log('Spojení s Pusherem navázáno. Přihlašuji kanál...');
+            
+            // Reset delaye při úspěšném spojení
+            reconnectDelay = 3000; 
+
+            // Přihlášení k odběru chatu tvého kanálu prostřednictvím Pusher protokolu
+            const subscribeMessage = {
+                event: "pusher:subscribe",
+                data: {
+                    channel: `chatrooms.${KICK_CHANNEL_ID}.v2`
+                }
+            };
+            ws.send(JSON.stringify(subscribeMessage));
+        };
+
+        ws.onmessage = (event) => {
+            const response = JSON.parse(event.data);
+            
+            // Ověření úspěšného odběru chatroomu
+            if (response.event === "pusher_internal:subscription_succeeded") {
+                console.log("Chat úspěšně připojen!");
+                if (currentAnswer === null) {
+                    generateQuestion();
+                    updateLeaderboard();
+                }
+                return;
             }
-        }
-    });
 
-    // Spustíme první příklad (už nečekáme na žádnou síť!)
-    generateQuestion();
-    updateLeaderboard();
+            // Zachycení nové chatové zprávy
+            if (response.event === "App\\Events\\ChatMessageEvent") {
+                const data = JSON.parse(response.data);
+                
+                if (data && data.sender && data.content) {
+                    const user = data.sender.username;
+                    const rawMessage = data.content.trim();
+                    
+                    // Převedení zprávy na číslo pro kontrolu
+                    const chatNumber = parseInt(rawMessage, 10);
+
+                    if (!isNaN(chatNumber) && chatNumber === currentAnswer && rawMessage === chatNumber.toString()) {
+                        // Přičtení bodu v RAM
+                        scores[user] = (scores[user] || 0) + 1;
+
+                        // Zobrazení výherce
+                        document.getElementById('winner-name').innerText = `${user} (+1b)`;
+                        updateLeaderboard();
+
+                        // Reset odpovědi a generování nového příkladu po 2 sekundách
+                        currentAnswer = null;
+                        document.getElementById('question').innerHTML = `<span style="color:#53fc18; font-size:38px;">Správně!</span>`;
+                        
+                        setTimeout(() => {
+                            generateQuestion();
+                        }, 2000);
+                    }
+                }
+            }
+        };
+
+        ws.onclose = (e) => {
+            console.log(`Spojení ukončeno. Pokus o reconnect za ${reconnectDelay / 1000}s.`, e);
+            document.getElementById('question').innerHTML = `<span id="status-msg">Spojení přerušeno. Reconnect...</span>`;
+            
+            // Exponenciální backoff
+            reconnectTimer = setTimeout(() => {
+                connectKickChat();
+                reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+            }, reconnectDelay);
+        };
+
+        ws.onerror = (err) => {
+            console.error('Chyba WebSocketu:', err);
+            ws.close();
+        };
+    }
+
+    // Inicializace hry při načtení
+    connectKickChat();
 </script>
+
 </body>
 </html>
