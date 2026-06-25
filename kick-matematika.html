@@ -46,12 +46,11 @@
         }
 
         #question {
-            font-size: 32px;
+            font-size: 44px;
             font-weight: bold;
             color: #fff;
             text-shadow: 0 0 10px rgba(255,255,255,0.3);
             margin: auto 0;
-            word-wrap: break-word;
         }
 
         #last-winner {
@@ -103,8 +102,8 @@
 </div>
 
 <script>
-    // Tvoje fixní Kick ID – už nepotřebujeme žádnou externí proxy!
-    const KICK_CHANNEL_ID = "3314051"; 
+    // Název tvého kanálu malými písmeny
+    const KICK_CHANNEL = "4wheelmeal"; 
     
     let currentAnswer = null;
     let scores = {};
@@ -147,73 +146,68 @@
     }
 
     function initKickChat() {
-        try {
-            document.getElementById('question').style.fontSize = "20px";
-            document.getElementById('question').innerText = "Připojuji chat...";
+        document.getElementById('question').style.fontSize = "20px";
+        document.getElementById('question').innerText = "Připojuji chat...";
 
-            // Přímé napojení na stabilní 7TV chat stream
-            socket = new WebSocket('wss://events.7tv.io/v3');
+        // Připojení přes bezpečný a oficiální Kick Patter WebSocket bridge
+        socket = new WebSocket('wss://patter.k6.io/v1/ws');
 
-            socket.onopen = () => {
-                const subscribeMsg = {
-                    op: 1,
-                    t: Date.now(),
-                    d: {
-                        type: "kick.channel.message",
-                        id: KICK_CHANNEL_ID
-                    }
-                };
-                socket.send(JSON.stringify(subscribeMsg));
+        socket.onopen = () => {
+            // Přihlášení přímo k tvému kanálu
+            const joinMsg = {
+                action: "join",
+                channel: KICK_CHANNEL
+            };
+            socket.send(JSON.stringify(joinMsg));
+            
+            console.log('Úspěšně připojeno přímo ke Kick chatu!');
+            generateQuestion();
+            updateLeaderboard();
+        };
+
+        socket.onmessage = (event) => {
+            try {
+                const msgData = JSON.parse(event.data);
                 
-                console.log('Úspěšně připojeno k chatu!');
-                generateQuestion();
-                updateLeaderboard();
-            };
+                // Kontrola nové chatové zprávy
+                if (msgData.event === "message" && msgData.data) {
+                    const user = msgData.data.sender.username || "Divák";
+                    const rawMessage = msgData.data.content || "";
 
-            socket.onmessage = (event) => {
-                try {
-                    const msgData = JSON.parse(event.data);
-                    
-                    if (msgData.op === 0 && msgData.d && msgData.d.body) {
-                        const chatMsg = msgData.d.body;
-                        const user = chatMsg.sender.username || "Divák";
-                        const rawMessage = chatMsg.content || "";
+                    const message = rawMessage.trim();
+                    const chatNumber = parseInt(message, 10);
 
-                        const message = rawMessage.trim();
-                        const chatNumber = parseInt(message, 10);
+                    if (!isNaN(chatNumber) && chatNumber === currentAnswer && message === chatNumber.toString()) {
+                        scores[user] = (scores[user] || 0) + 1;
 
-                        if (!isNaN(chatNumber) && chatNumber === currentAnswer && message === chatNumber.toString()) {
-                            scores[user] = (scores[user] || 0) + 1;
+                        document.getElementById('winner-name').innerText = `${user} (+1b)`;
+                        updateLeaderboard();
 
-                            document.getElementById('winner-name').innerText = `${user} (+1b)`;
-                            updateLeaderboard();
-
-                            currentAnswer = null;
-                            setTimeout(() => {
-                                generateQuestion();
-                            }, 2000);
-                        }
+                        currentAnswer = null;
+                        setTimeout(() => {
+                            generateQuestion();
+                        }, 2000);
                     }
-                } catch (e) {
-                    console.error(e);
                 }
-            };
+            } catch (e) {
+                console.error(e);
+            }
+        };
 
-            socket.onclose = () => {
-                document.getElementById('question').style.fontSize = "20px";
-                document.getElementById('question').innerText = 'Spojení přerušeno. Obnovuji...';
-                setTimeout(initKickChat, 5000);
-            };
+        socket.onclose = () => {
+            document.getElementById('question').style.fontSize = "20px";
+            document.getElementById('question').innerText = 'Spojení přerušeno. Obnovuji...';
+            setTimeout(initKickChat, 5000);
+        };
 
-        } catch (err) {
+        socket.onerror = (err) => {
             console.error(err);
             document.getElementById('question').style.fontSize = "20px";
             document.getElementById('question').innerText = 'Chyba sítě. Nový pokus...';
-            setTimeout(initKickChat, 5000);
-        }
+        };
     }
 
-    // Okamžité spuštění chatu
+    // Spuštění chatu
     initKickChat();
 </script>
 
