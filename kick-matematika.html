@@ -26,7 +26,6 @@
             border: 3px solid #53fc18;
             box-shadow: 0 0 25px rgba(83, 252, 24, 0.4), inset 0 0 15px rgba(83, 252, 24, 0.1);
             box-sizing: border-box;
-            position: relative;
         }
 
         .box {
@@ -65,6 +64,13 @@
             color: #ffffff;
             text-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
             margin: auto 0;
+        }
+
+        .status-msg {
+            font-size: 22px;
+            color: #aaaaaa;
+            font-family: sans-serif;
+            font-weight: bold;
         }
 
         #last-winner {
@@ -109,18 +115,6 @@
             font-family: 'Arial Black', sans-serif;
             text-shadow: 0 0 5px rgba(83, 252, 24, 0.3);
         }
-
-        /* Skrytý popout chat na pozadí, který čte zprávy */
-        #kick-chat-loader {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            opacity: 0.01;
-            bottom: 0;
-            left: 0;
-            border: none;
-            pointer-events: none;
-        }
     </style>
 </head>
 <body>
@@ -128,25 +122,32 @@
 <div id="widget-container">
     <div class="box box-left">
         <h2>Vyřeš příklad!</h2>
-        <div id="question">Načítání hry...</div>
+        <div id="question"><span class="status-msg">Připojování...</span></div>
         <div id="last-winner">Minulé kolo: <span id="winner-name">-</span></div>
     </div>
 
     <div class="box box-right">
         <h2>TOP 5 Šprti</h2>
         <ol id="leaderboard">
-            <li>Nikdo zatím nebodoval</li>
+            <li>Čeká se na body...</li>
         </ol>
     </div>
 </div>
 
-<iframe id="kick-chat-loader" src="https://kick.com/popout/4wheelmeal/chat"></iframe>
-
 <script>
+    const KICK_CHANNEL_ID = "3314051"; // ID pro 4wheelmeal
+    
     let currentAnswer = null;
     let scores = {};
+    let ws = null;
+    
+    // Nastavení pro exponenciální backoff reconnect podle zadání
+    let reconnectDelay = 3000; 
+    const MAX_RECONNECT_DELAY = 60000; 
+    let reconnectTimer = null;
 
     function generateQuestion() {
+        // Rozsah 0 - 100 podle zadání
         const num1 = Math.floor(Math.random() * 101);
         const num2 = Math.floor(Math.random() * 101);
         const operators = ['+', '-'];
@@ -154,6 +155,7 @@
         
         if (operator === '+') {
             currentAnswer = num1 + num2;
+            if (currentAnswer > 100) return generateQuestion(); // Udržujeme strop do 100
         } else {
             if (num1 < num2) return generateQuestion(); // Žádná záporná čísla
             currentAnswer = num1 - num2;
@@ -171,7 +173,7 @@
             .slice(0, 5);
 
         if (sorted.length === 0) {
-            leaderboardEl.innerHTML = '<li style="list-style:none; text-align:center; color:#666; margin-top:40px;">Nikdo zatím nebodoval</li>';
+            leaderboardEl.innerHTML = '<li style="list-style:none; text-align:center; color:#666; margin-top:40px;">Čeká se na body...</li>';
             return;
         }
 
@@ -182,45 +184,84 @@
         });
     }
 
-    // Sledování zpráv přes bezpečné okno prohlížeče
-    window.addEventListener('message', (event) => {
-        // Kontrola, zda zpráva přichází z Kick popout okna
-        if (event.origin.includes('kick.com') || event.data.type === 'kick_message') {
-            let user = event.data.user;
-            let rawMessage = event.data.text;
+    function initKickConnection() {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        
+        // Připojení na oficiální veřejný Pusher cluster, který Kick používá
+        ws = new WebSocket('wss://ws-us2.pusher.com/app/eb1d5f283081a78b93b4?protocol=7&client=js&version=7.6.0&flash=false');
 
-            // Pokročilé parsování pokud Kick posílá data jako objekt/JSON
-            if (event.data.data && event.data.data.content) {
-                user = event.data.data.sender.username;
-                rawMessage = event.data.data.content;
-            }
+        ws.onopen = () => {
+            // Po úspěšném spojení vyresetujeme čekací dobu zpět na 3s
+            reconnectDelay = 3000; 
 
-            if (!user || !rawMessage) return;
+            // Přihlášení k chatu kanálu
+            const subscribeMsg = {
+                event: "pusher:subscribe",
+                data: {
+                    channel: `chatrooms.${KICK_CHANNEL_ID}.v2`
+                }
+            };
+            ws.send(JSON.stringify(subscribeMsg));
+        };
 
-            const message = rawMessage.trim();
-            const chatNumber = parseInt(message, 10);
-
-            if (!isNaN(chatNumber) && chatNumber === currentAnswer && message === chatNumber.toString()) {
-                scores[user] = (scores[user] || 0) + 1;
-
-                document.getElementById('winner-name').innerText = `${user} (+1b)`;
-                updateLeaderboard();
-
-                currentAnswer = null;
-                document.getElementById('question').innerHTML = `<span style="color:#53fc18; font-size:38px;">Správně!</span>`;
-                
-                setTimeout(() => {
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            
+            // Jakmile nás Pusher úspěšně přihlásí do místnosti
+            if (msg.event === "pusher_internal:subscription_succeeded") {
+                if (currentAnswer === null) {
                     generateQuestion();
-                }, 2000);
+                    updateLeaderboard();
+                }
+                return;
             }
-        }
-    });
 
-    // Spuštění při načtení
-    setTimeout(() => {
-        generateQuestion();
-        updateLeaderboard();
-    }, 1000);
+            // Odchycení zpráv z chatu
+            if (msg.event === "App\\Events\\ChatMessageEvent") {
+                const chatData = JSON.parse(msg.data);
+                
+                if (chatData && chatData.sender && chatData.content) {
+                    const user = chatData.sender.username;
+                    const text = chatData.content.trim();
+                    const chatNumber = parseInt(text, 10);
+
+                    // Kontrola správné odpovědi
+                    if (!isNaN(chatNumber) && chatNumber === currentAnswer && text === chatNumber.toString()) {
+                        scores[user] = (scores[user] || 0) + 1;
+
+                        // Zobrazení: Minulé kolo: USERNAME (+1b) podle zadání
+                        document.getElementById('winner-name').innerText = `${user} (+1b)`;
+                        updateLeaderboard();
+
+                        currentAnswer = null;
+                        document.getElementById('question').innerHTML = `<span style="color:#53fc18; font-size:38px;">Správně!</span>`;
+                        
+                        // Počkat 2 sekundy a vygenerovat nový příklad
+                        setTimeout(() => {
+                            generateQuestion();
+                        }, 2000);
+                    }
+                }
+            }
+        };
+
+        ws.onclose = () => {
+            document.getElementById('question').innerHTML = `<span class="status-msg">Spojení přerušeno. Reconnect...</span>`;
+            
+            // Exponenciální backoff: 3s -> 6s -> 12s -> ...
+            reconnectTimer = setTimeout(() => {
+                initKickConnection();
+                reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+            }, reconnectDelay);
+        };
+
+        ws.onerror = () => {
+            ws.close();
+        };
+    }
+
+    // Spuštění widgetu
+    initKickConnection();
 </script>
 
 </body>
