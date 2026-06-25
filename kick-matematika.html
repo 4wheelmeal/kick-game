@@ -103,7 +103,9 @@
 </div>
 
 <script>
-    const KICK_CHANNEL = '4wheelmeal'; 
+    // Tvoje fixní Kick ID – už nepotřebujeme žádnou externí proxy!
+    const KICK_CHANNEL_ID = "3314051"; 
+    
     let currentAnswer = null;
     let scores = {};
     let socket = null;
@@ -144,22 +146,12 @@
         });
     }
 
-    async function initKickChat() {
+    function initKickChat() {
         try {
             document.getElementById('question').style.fontSize = "20px";
-            document.getElementById('question').innerText = "Hledám Kick kanál...";
-            
-            const res = await fetch(`https://kickc.at/api/v1/channel/${KICK_CHANNEL}`);
-            const data = await res.json();
-            const channelId = data.id;
-
-            if (!channelId) {
-                document.getElementById('question').innerText = "Kanál nenalezen.";
-                return;
-            }
-
             document.getElementById('question').innerText = "Připojuji chat...";
 
+            // Přímé napojení na stabilní 7TV chat stream
             socket = new WebSocket('wss://events.7tv.io/v3');
 
             socket.onopen = () => {
@@ -168,12 +160,12 @@
                     t: Date.now(),
                     d: {
                         type: "kick.channel.message",
-                        id: channelId.toString()
+                        id: KICK_CHANNEL_ID
                     }
                 };
                 socket.send(JSON.stringify(subscribeMsg));
                 
-                console.log('Úspěšně připojeno!');
+                console.log('Úspěšně připojeno k chatu!');
                 generateQuestion();
                 updateLeaderboard();
             };
@@ -221,6 +213,7 @@
         }
     }
 
+    // Okamžité spuštění chatu
     initKickChat();
 </script>
 
