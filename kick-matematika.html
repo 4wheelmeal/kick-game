@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <title>4wheelMeal Kick Offline Math Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            overflow: hidden;
+            font-family: 'Arial Black', Impact, sans-serif;
+        }
+
+        #widget-container {
+            display: flex;
+            gap: 20px;
+            width: 850px;
+            height: 280px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 15px;
+            border: 3px solid #53fc18; /* Kick zelená */
+            box-shadow: 0 0 20px rgba(83, 252, 24, 0.3);
+            box-sizing: border-box;
+        }
+
+        .box {
+            flex: 1;
+            background: rgba(15, 15, 15, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+
+        h2 {
+            margin: 0 0 5px 0;
+            color: #53fc18;
+            text-transform: uppercase;
+            font-size: 18px;
+            letter-spacing: 1px;
+        }
+
+        #question {
+            font-size: 32px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 0 10px rgba(255,255,255,0.3);
+            margin: auto 0;
+            word-wrap: break-word;
+        }
+
+        #last-winner {
+            font-size: 14px;
+            color: #aaaaaa;
+            margin-top: auto;
+        }
+
+        #winner-name {
+            color: #53fc18;
+            font-weight: bold;
+        }
+
+        ol {
+            text-align: left;
+            margin: 0;
+            padding-left: 25px;
+            font-size: 16px;
+            color: #fff;
+            list-style-type: decimal;
+        }
+
+        li {
+            margin-bottom: 6px;
+        }
+
+        li span {
+            color: #53fc18;
+            float: right;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="widget-container">
+    <div class="box">
+        <h2>Vyřeš příklad!</h2>
+        <div id="question">Připojování ke Kick chatu...</div>
+        <div id="last-winner">Minulé kolo: <span id="winner-name">-</span></div>
+    </div>
+
+    <div class="box">
+        <h2>TOP 5 Šprti</h2>
+        <ol id="leaderboard">
+            <li>Čeká se na body...</li>
+        </ol>
+    </div>
+</div>
+
+<script>
+    const KICK_CHANNEL = '4wheelmeal'; 
+    let currentAnswer = null;
+    let scores = {};
+    let socket = null;
+
+    function generateQuestion() {
+        const num1 = Math.floor(Math.random() * 40) + 1;
+        const num2 = Math.floor(Math.random() * 40) + 1;
+        const operators = ['+', '-'];
+        const operator = operators[Math.floor(Math.random() * operators.length)];
+        
+        if (operator === '+') {
+            currentAnswer = num1 + num2;
+        } else {
+            currentAnswer = num1 - num2;
+        }
+
+        document.getElementById('question').style.fontSize = "44px";
+        document.getElementById('question').innerText = `${num1} ${operator} ${num2} = ?`;
+    }
+
+    function updateLeaderboard() {
+        const leaderboardEl = document.getElementById('leaderboard');
+        leaderboardEl.innerHTML = '';
+
+        const sorted = Object.entries(scores)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5);
+
+        if (sorted.length === 0) {
+            leaderboardEl.innerHTML = '<li>Nikdo zatím nebodoval</li>';
+            return;
+        }
+
+        sorted.forEach(([user, score]) => {
+            const li = document.createElement('li');
+            li.innerHTML = `${user} <span>${score} b</span>`;
+            leaderboardEl.appendChild(li);
+        });
+    }
+
+    async function initKickChat() {
+        try {
+            document.getElementById('question').style.fontSize = "20px";
+            document.getElementById('question').innerText = "Hledám Kick kanál...";
+            
+            const res = await fetch(`https://kickc.at/api/v1/channel/${KICK_CHANNEL}`);
+            const data = await res.json();
+            const channelId = data.id;
+
+            if (!channelId) {
+                document.getElementById('question').innerText = "Kanál nenalezen.";
+                return;
+            }
+
+            document.getElementById('question').innerText = "Připojuji chat...";
+
+            socket = new WebSocket('wss://events.7tv.io/v3');
+
+            socket.onopen = () => {
+                const subscribeMsg = {
+                    op: 1,
+                    t: Date.now(),
+                    d: {
+                        type: "kick.channel.message",
+                        id: channelId.toString()
+                    }
+                };
+                socket.send(JSON.stringify(subscribeMsg));
+                
+                console.log('Úspěšně připojeno!');
+                generateQuestion();
+                updateLeaderboard();
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const msgData = JSON.parse(event.data);
+                    
+                    if (msgData.op === 0 && msgData.d && msgData.d.body) {
+                        const chatMsg = msgData.d.body;
+                        const user = chatMsg.sender.username || "Divák";
+                        const rawMessage = chatMsg.content || "";
+
+                        const message = rawMessage.trim();
+                        const chatNumber = parseInt(message, 10);
+
+                        if (!isNaN(chatNumber) && chatNumber === currentAnswer && message === chatNumber.toString()) {
+                            scores[user] = (scores[user] || 0) + 1;
+
+                            document.getElementById('winner-name').innerText = `${user} (+1b)`;
+                            updateLeaderboard();
+
+                            currentAnswer = null;
+                            setTimeout(() => {
+                                generateQuestion();
+                            }, 2000);
+                        }
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            };
+
+            socket.onclose = () => {
+                document.getElementById('question').style.fontSize = "20px";
+                document.getElementById('question').innerText = 'Spojení přerušeno. Obnovuji...';
+                setTimeout(initKickChat, 5000);
+            };
+
+        } catch (err) {
+            console.error(err);
+            document.getElementById('question').style.fontSize = "20px";
+            document.getElementById('question').innerText = 'Chyba sítě. Nový pokus...';
+            setTimeout(initKickChat, 5000);
+        }
+    }
+
+    initKickChat();
+</script>
+
+</body>
+</html>
