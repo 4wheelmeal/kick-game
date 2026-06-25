@@ -89,7 +89,7 @@
 <div id="widget-container">
     <div class="box">
         <h2>Vyřeš příklad!</h2>
-        <div id="question">Připojování ke Kick chatu...</div>
+        <div id="question">Připojuji chat...</div>
         <div id="last-winner">Minulé kolo: <span id="winner-name">-</span></div>
     </div>
 
@@ -102,12 +102,12 @@
 </div>
 
 <script>
-    // Název tvého kanálu malými písmeny
     const KICK_CHANNEL = "4wheelmeal"; 
     
     let currentAnswer = null;
     let scores = {};
     let socket = null;
+    let pingInterval = null;
 
     function generateQuestion() {
         const num1 = Math.floor(Math.random() * 40) + 1;
@@ -146,21 +146,28 @@
     }
 
     function initKickChat() {
+        if (pingInterval) clearInterval(pingInterval);
+        
         document.getElementById('question').style.fontSize = "20px";
         document.getElementById('question').innerText = "Připojuji chat...";
 
-        // Připojení přes bezpečný a oficiální Kick Patter WebSocket bridge
         socket = new WebSocket('wss://patter.k6.io/v1/ws');
 
         socket.onopen = () => {
-            // Přihlášení přímo k tvému kanálu
             const joinMsg = {
                 action: "join",
                 channel: KICK_CHANNEL
             };
             socket.send(JSON.stringify(joinMsg));
             
-            console.log('Úspěšně připojeno přímo ke Kick chatu!');
+            // Každých 20 vteřin pošleme "ping", aby spojení nezhaslo
+            pingInterval = setInterval(() => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ action: "ping" }));
+                }
+            }, 20000);
+
+            console.log('Úspěšně připojeno!');
             generateQuestion();
             updateLeaderboard();
         };
@@ -169,7 +176,6 @@
             try {
                 const msgData = JSON.parse(event.data);
                 
-                // Kontrola nové chatové zprávy
                 if (msgData.event === "message" && msgData.data) {
                     const user = msgData.data.sender.username || "Divák";
                     const rawMessage = msgData.data.content || "";
@@ -195,19 +201,17 @@
         };
 
         socket.onclose = () => {
+            if (pingInterval) clearInterval(pingInterval);
             document.getElementById('question').style.fontSize = "20px";
             document.getElementById('question').innerText = 'Spojení přerušeno. Obnovuji...';
-            setTimeout(initKickChat, 5000);
+            setTimeout(initKickChat, 4000);
         };
 
         socket.onerror = (err) => {
             console.error(err);
-            document.getElementById('question').style.fontSize = "20px";
-            document.getElementById('question').innerText = 'Chyba sítě. Nový pokus...';
         };
     }
 
-    // Spuštění chatu
     initKickChat();
 </script>
 
